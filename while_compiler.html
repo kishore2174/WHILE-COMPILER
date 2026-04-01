@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WHILE Compiler — All 6 Phases</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 20px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 16px; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; }
+  .badge-warn { background: #451a03; color: #fb923c; }
+  .badge-danger { background: #3f0d0d; color: #f87171; }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .panels { grid-template-columns: 1fr; } }
+  label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .07em; display: block; margin-bottom: 5px; }
+  select, textarea {
+    width: 100%; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12.5px;
+    padding: 9px 11px; border: 1px solid #1e293b; border-radius: 8px;
+    background: #0d1117; color: #e2e8f0; resize: vertical; outline: none;
+    transition: border-color .15s;
+  }
+  select:focus, textarea:focus { border-color: #334155; }
+  textarea { min-height: 130px; line-height: 1.6; }
+  .left-panel { display: flex; flex-direction: column; gap: 10px; }
+  .right-panel { display: flex; flex-direction: column; gap: 10px; }
+  .run-btn {
+    font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 20px;
+    border: 1px solid #334155; border-radius: 8px; background: #1e293b;
+    color: #e2e8f0; cursor: pointer; transition: background .15s, transform .1s;
+  }
+  .run-btn:hover { background: #273549; }
+  .run-btn:active { transform: scale(0.98); }
+  .phase-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tab {
+    font-family: inherit; font-size: 11px; padding: 5px 11px;
+    border: 1px solid #1e293b; border-radius: 7px; background: transparent;
+    color: #64748b; cursor: pointer; transition: all .15s; white-space: nowrap;
+  }
+  .tab:hover { color: #cbd5e1; border-color: #334155; }
+  .tab.active { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+  .tab.danger { border-color: #7f1d1d; color: #f87171; }
+  .tab.danger.active { background: #3f0d0d; }
+  .pipeline-bar { display: flex; gap: 0; overflow-x: auto; }
+  .pipe-step {
+    font-size: 10px; font-weight: 600; padding: 4px 10px;
+    border: 1px solid #1e293b; border-right: none; color: #475569;
+    background: #0d1117; white-space: nowrap; transition: all .2s;
+  }
+  .pipe-step:first-child { border-radius: 7px 0 0 7px; }
+  .pipe-step:last-child { border-right: 1px solid #1e293b; border-radius: 0 7px 7px 0; }
+  .pipe-step.done { background: #052e16; color: #4ade80; border-color: #14532d; }
+  .pipe-step.error { background: #3f0d0d; color: #f87171; border-color: #7f1d1d; }
+  .pipe-step.warn { background: #431407; color: #fb923c; border-color: #7c2d12; }
+  .output-box {
+    flex: 1; border: 1px solid #1e293b; border-radius: 10px;
+    background: #0d1117; padding: 12px; min-height: 340px; overflow-y: auto; max-height: 520px;
+  }
+  pre { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; color: #e2e8f0; }
+  .token { display: inline-block; padding: 1px 6px; border-radius: 4px; margin: 2px; font-family: monospace; font-size: 11.5px; }
+  .tok-kw  { background: #1e3a5f; color: #60a5fa; }
+  .tok-id  { background: #1a2535; color: #cbd5e1; border: 1px solid #1e293b; }
+  .tok-num { background: #052e16; color: #4ade80; }
+  .tok-op  { background: #3b1f06; color: #fb923c; }
+  .tok-punct { color: #475569; }
+  .tok-err { background: #3f0d0d; color: #f87171; }
+  .alert { border-radius: 7px; padding: 8px 12px; font-size: 12px; margin-bottom: 6px; }
+  .alert-danger { background: #3f0d0d; color: #f87171; border: 1px solid #7f1d1d; }
+  .alert-success { background: #052e16; color: #4ade80; border: 1px solid #14532d; }
+  .alert-info  { background: #0c1a3a; color: #60a5fa; border: 1px solid #1e3a5f; }
+  .alert-warn  { background: #431407; color: #fb923c; border: 1px solid #7c2d12; }
+  h3 { font-size: 11px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: .07em; margin: 12px 0 6px; }
+  .ir-table, .sym-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ir-table th, .sym-table th {
+    font-size: 10px; text-align: left; padding: 5px 8px;
+    border-bottom: 1px solid #1e293b; color: #475569; font-weight: 600; text-transform: uppercase;
+  }
+  .ir-table td, .sym-table td { padding: 4px 8px; border-bottom: 1px solid #0d1117; font-family: monospace; color: #cbd5e1; }
+  .ir-table tr.highlight td { background: #3b1f06; }
+  .loop-badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; margin-left: 6px; }
+  .loop-inf  { background: #3f0d0d; color: #f87171; }
+  .loop-safe { background: #052e16; color: #4ade80; }
+  .loop-risk { background: #431407; color: #fb923c; }
+  .loop-card { border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  code { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11.5px; color: #94a3b8; }
+  .asm-line { font-family: monospace; font-size: 12px; line-height: 1.8; }
+  .asm-label { color: #60a5fa; font-weight: 600; }
+  .asm-op    { color: #fb923c; }
+  .asm-comment { color: #374151; }
+  .asm-reg   { color: #4ade80; }
+</style>
+</head>
+<body>
+
+<h1>WHILE Language Compiler <span class="badge badge-warn">All 6 Phases</span><span class="badge badge-danger">Infinite Loop Detector</span></h1>
+<p class="subtitle">Automatic pipeline · Static analysis · 5 built-in test cases · Innovation twist: infinite loop detection</p>
+
+<div class="panels">
+  <!-- LEFT -->
+  <div class="left-panel">
+    <div>
+      <label>Test Case</label>
+      <select id="testcase" onchange="loadTestCase()">
+        <option value="0">TC-1: Classic — i=1, while (i >= 10) goto L2</option>
+        <option value="1">TC-2: Safe — counter up to 5</option>
+        <option value="2">TC-3: Infinite — condition always true (x > 0, x grows)</option>
+        <option value="3">TC-4: Goto creates infinite loop</option>
+        <option value="4">TC-5: Nested while — inner terminates, outer safe</option>
+        <option value="5">✏ Custom Input</option>
+      </select>
+    </div>
+    <div>
+      <label>Source Code</label>
+      <textarea id="src" rows="9" spellcheck="false">i = 1;
+while (i >= 10) goto L2;</textarea>
+    </div>
+    <button class="run-btn" onclick="compile()">▶ Compile &amp; Analyze</button>
+
+    <div>
+      <label>Pipeline Status</label>
+      <div class="pipeline-bar">
+        <div class="pipe-step" id="ps0">Lexer</div>
+        <div class="pipe-step" id="ps1">Parser</div>
+        <div class="pipe-step" id="ps2">Semantic</div>
+        <div class="pipe-step" id="ps3">IR</div>
+        <div class="pipe-step" id="ps4">Opt</div>
+        <div class="pipe-step" id="ps5">CodeGen</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="right-panel">
+    <div>
+      <label>Phase Output</label>
+      <div class="phase-tabs" id="phase-tabs">
+        <button class="tab active" onclick="showPhase(0)">1. Lexer</button>
+        <button class="tab" onclick="showPhase(1)">2. Parser</button>
+        <button class="tab" onclick="showPhase(2)">3. Semantic</button>
+        <button class="tab" onclick="showPhase(3)">4. IR Gen</button>
+        <button class="tab" onclick="showPhase(4)">5. Optimizer</button>
+        <button class="tab" onclick="showPhase(5)">6. Code Gen</button>
+      </div>
+    </div>
+    <div class="output-box" id="output-box">
+      <pre style="color:#374151">Press ▶ Compile &amp; Analyze to run all 6 phases automatically...</pre>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   TEST CASES
+   ============================================================ */
+const TEST_CASES = [
+  `i = 1;\nwhile (i >= 10) goto L2;`,
+  `i = 0;\nwhile (i < 5) {\n  i = i + 1;\n}`,
+  `x = 1;\nwhile (x > 0) {\n  x = x + 1;\n}`,
+  `L1:\n  x = x + 1;\n  goto L1;`,
+  `i = 0;\nj = 10;\nwhile (i < j) {\n  while (j > 0) {\n    j = j - 1;\n  }\n  i = i + 1;\n}`
+];
+
+const KEYWORDS = new Set(['while','if','else','goto','break','return','int','float']);
+let phaseResults = [];
+let activePhase = 0;
+
+function loadTestCase() {
+  const v = document.getElementById('testcase').value;
+  if (v !== '5') document.getElementById('src').value = TEST_CASES[+v];
+}
+
+/* ============================================================
+   PHASE 1: LEXER
+   ============================================================ */
+function tokenize(src) {
+  const tokens = [];
+  let i = 0;
+  while (i < src.length) {
+    if (/\s/.test(src[i])) { i++; continue; }
+    if (src[i] === '/' && src[i+1] === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
+
+    if (/[0-9]/.test(src[i])) {
+      let n = '';
+      while (i < src.length && /[0-9.]/.test(src[i])) n += src[i++];
+      tokens.push({ type: 'NUM', val: n });
+      continue;
+    }
+    if (/[a-zA-Z_]/.test(src[i])) {
+      let id = '';
+      while (i < src.length && /[a-zA-Z0-9_]/.test(src[i])) id += src[i++];
+      tokens.push({ type: KEYWORDS.has(id) ? 'KW' : 'ID', val: id });
+      continue;
+    }
+    const two = src.slice(i, i+2);
+    if (['>=','<=','==','!=','&&','||','++','--'].includes(two)) {
+      tokens.push({ type: 'OP', val: two }); i += 2; continue;
+    }
+    const ch = src[i];
+    if ('+-*/=<>!'.includes(ch)) { tokens.push({ type: 'OP', val: ch }); i++; continue; }
+    if (';{}(),:'.includes(ch)) { tokens.push({ type: 'PUNCT', val: ch }); i++; continue; }
+    tokens.push({ type: 'ERR', val: ch }); i++;
+  }
+  tokens.push({ type: 'EOF', val: 'EOF' });
+  return tokens;
+}
+
+/* ============================================================
+   PHASE 2: PARSER (Recursive Descent)
+   ============================================================ */
+class Parser {
+  constructor(tokens) { this.tokens = tokens; this.pos = 0; this.errors = []; }
+  peek() { return this.tokens[this.pos]; }
+  consume(type, val) {
+    const t = this.tokens[this.pos];
+    if (type && t.type !== type) { this.errors.push(`Expected type '${type}' but got '${t.type}' ("${t.val}")`); return null; }
+    if (val && t.val !== val)   { this.errors.push(`Expected '${val}' but got '${t.val}'`); return null; }
+    this.pos++;
+    return t;
+  }
+  parseProgram() {
+    const stmts = [];
+    while (this.peek().type !== 'EOF') {
+      const s = this.parseStmt();
+      if (s) stmts.push(s);
+    }
+    return { type: 'Program', body: stmts };
+  }
+  parseStmt() {
+    const t = this.peek();
+    // Label: ID ':'
+    if (t.type === 'ID' && this.tokens[this.pos+1]?.val === ':') {
+      const lbl = t.val; this.pos += 2;
+      return { type: 'Label', name: lbl };
+    }
+    if (t.type === 'KW' && t.val === 'while') return this.parseWhile();
+    if (t.type === 'KW' && t.val === 'goto') {
+      this.pos++;
+      const target = this.consume('ID');
+      this.consume('PUNCT', ';');
+      return { type: 'Goto', target: target?.val };
+    }
+    if (t.type === 'ID') {
+      this.pos++;
+      this.consume('OP', '=');
+      const expr = this.parseExpr();
+      this.consume('PUNCT', ';');
+      return { type: 'Assign', name: t.val, expr };
+    }
+    if (t.type === 'PUNCT' && t.val === '{') {
+      this.pos++;
+      const stmts = [];
+      while (this.peek().val !== '}' && this.peek().type !== 'EOF') stmts.push(this.parseStmt());
+      this.consume('PUNCT', '}');
+      return { type: 'Block', body: stmts };
+    }
+    this.errors.push(`Unexpected token: "${t.val}"`);
+    this.pos++;
+    return null;
+  }
+  parseWhile() {
+    this.pos++;
+    this.consume('PUNCT', '(');
+    const cond = this.parseExpr();
+    this.consume('PUNCT', ')');
+    const body = this.parseStmt();
+    return { type: 'While', cond, body };
+  }
+  parseExpr() {
+    let left = this.parsePrimary();
+    while (['>=','<=','==','!=','>','<','+','-','*','/','&&','||'].includes(this.peek()?.val)) {
+      const op = this.tokens[this.pos++].val;
+      const right = this.parsePrimary();
+      left = { type: 'BinOp', op, left, right };
+    }
+    return left;
+  }
+  parsePrimary() {
+    const t = this.peek();
+    if (t.type === 'NUM') { this.pos++; return { type: 'Num', val: parseFloat(t.val) }; }
+    if (t.type === 'ID')  { this.pos++; return { type: 'Var', name: t.val }; }
+    if (t.val === '(') {
+      this.pos++;
+      const e = this.parseExpr();
+      this.consume('PUNCT', ')');
+      return e;
+    }
+    this.errors.push(`Unexpected primary: "${t.val}"`);
+    this.pos++;
+    return { type: 'Num', val: 0 };
+  }
+}
+
+function astToString(node, indent = 0) {
+  if (!node) return '';
+  const pad = '  '.repeat(indent);
+  if (node.type === 'Program') return node.body.map(s => astToString(s, indent)).filter(Boolean).join('\n');
+  if (node.type === 'Assign')  return `${pad}[Assign]  ${node.name}  =  ${exprStr(node.expr)}`;
+  if (node.type === 'While')   return `${pad}[While]  cond: ${exprStr(node.cond)}\n${astToString(node.body, indent+1)}`;
+  if (node.type === 'Block')   return node.body.map(s => astToString(s, indent)).filter(Boolean).join('\n');
+  if (node.type === 'Goto')    return `${pad}[Goto]  → ${node.target}`;
+  if (node.type === 'Label')   return `${pad}[Label]  ${node.name}:`;
+  return `${pad}[${node.type}]`;
+}
+
+function exprStr(e) {
+  if (!e) return '?';
+  if (e.type === 'Num')   return String(e.val);
+  if (e.type === 'Var')   return e.name;
+  if (e.type === 'BinOp') return `(${exprStr(e.left)} ${e.op} ${exprStr(e.right)})`;
+  return '?';
+}
+
+/* ============================================================
+   PHASE 3: SEMANTIC ANALYSIS
+   ============================================================ */
+function semanticAnalysis(ast) {
+  const symbols = {};
+  const warnings = [];
+  const errors   = [];
+
+  function collectVars(node) {
+    if (!node) return;
+    if (node.type === 'Assign') {
+      if (!symbols[node.name]) symbols[node.name] = { type: 'int', initialized: true, modified: false };
+      else symbols[node.name].modified = true;
+      scanExpr(node.expr);
+    } else if (node.type === 'While')   { scanExpr(node.cond); collectVars(node.body); }
+    else if (node.type === 'Block')     node.body.forEach(collectVars);
+    else if (node.type === 'Program')   node.body.forEach(collectVars);
+  }
+  function scanExpr(e) {
+    if (!e) return;
+    if (e.type === 'Var') {
+      if (!symbols[e.name]) {
+        warnings.push(`Variable '${e.name}' used before explicit declaration/assignment`);
+        symbols[e.name] = { type: 'int', initialized: false, modified: false };
+      }
+    }
+    if (e.type === 'BinOp') { scanExpr(e.left); scanExpr(e.right); }
+  }
+  collectVars(ast);
+  return { symbols, warnings, errors };
+}
+
+/* ============================================================
+   PHASE 4: IR GENERATION (3-Address Code)
+   ============================================================ */
+let irCount = 0;
+function genIR(ast) {
+  irCount = 0;
+  const ir = [];
+  function newTemp()  { return `t${irCount++}`; }
+  function newLabel() { return `LL${irCount++}`; }
+
+  function gen(node) {
+    if (!node) return;
+    if (node.type === 'Program') { node.body.forEach(gen); return; }
+    if (node.type === 'Block')   { node.body.forEach(gen); return; }
+    if (node.type === 'Label')   { ir.push({ op: 'label', arg1: node.name }); return; }
+    if (node.type === 'Assign') {
+      const e = genExpr(node.expr);
+      ir.push({ op: 'assign', result: node.name, arg1: e });
+      return;
+    }
+    if (node.type === 'While') {
+      const start = newLabel();
+      const end   = newLabel();
+      ir.push({ op: 'label', arg1: start });
+      const condT = genExpr(node.cond);
+      ir.push({ op: 'ifFalse', arg1: condT, goto: end });
+      gen(node.body);
+      ir.push({ op: 'goto', goto: start });
+      ir.push({ op: 'label', arg1: end });
+      return;
+    }
+    if (node.type === 'Goto') { ir.push({ op: 'goto', goto: node.target }); return; }
+  }
+  function genExpr(e) {
+    if (e.type === 'Num')   return String(e.val);
+    if (e.type === 'Var')   return e.name;
+    if (e.type === 'BinOp') {
+      const l = genExpr(e.left), r = genExpr(e.right);
+      const t = newTemp();
+      ir.push({ op: 'binop', op2: e.op, result: t, arg1: l, arg2: r });
+      return t;
+    }
+    return '?';
+  }
+  gen(ast);
+  return ir;
+}
+
+/* ============================================================
+   PHASE 5: OPTIMIZER (Constant Folding + Propagation)
+   ============================================================ */
+function optimizeIR(ir) {
+  const opts  = [];
+  const notes = [];
+  const consts = {};
+
+  for (let i = 0; i < ir.length; i++) {
+    const ins = ir[i];
+
+    if (ins.op === 'assign' && /^-?[0-9.]+$/.test(ins.arg1)) {
+      consts[ins.result] = ins.arg1;
+    }
+
+    if (ins.op === 'binop') {
+      let l = consts[ins.arg1] ?? ins.arg1;
+      let r = consts[ins.arg2] ?? ins.arg2;
+      if (/^-?[0-9.]+$/.test(l) && /^-?[0-9.]+$/.test(r)) {
+        let v;
+        try { v = eval(`${l} ${ins.op2} ${r}`); } catch(e) { v = null; }
+        if (v !== null) {
+          opts.push({ ...ins, folded: true, foldedVal: v });
+          consts[ins.result] = String(v);
+          notes.push(`Constant fold: ${l} ${ins.op2} ${r}  →  ${v}  (stored in ${ins.result})`);
+          continue;
+        }
+      }
+    }
+
+    if (ins.op === 'assign' && consts[ins.arg1] !== undefined && ins.arg1 !== ins.result) {
+      opts.push({ ...ins, propagated: true });
+      consts[ins.result] = consts[ins.arg1];
+      notes.push(`Constant propagation: ${ins.result} ← ${ins.arg1} = ${consts[ins.arg1]}`);
+      continue;
+    }
+
+    opts.push(ins);
+  }
+
+  if (!notes.length) notes.push('No constant folding or propagation opportunities found in this program.');
+  return { ir: opts, notes };
+}
+
+/* ============================================================
+   PHASE 6: CODE GENERATION (WHILE-ISA Assembly)
+   ============================================================ */
+function generateCode(ir) {
+  const lines  = [];
+  const regMap = {};
+  let regN = 1;
+  function reg(name) {
+    if (!regMap[name]) regMap[name] = `R${regN++}`;
+    return regMap[name];
+  }
+  function isImm(v) { return /^-?[0-9.]+$/.test(v); }
+
+  lines.push('; =========================================');
+  lines.push('; WHILE-ISA Target Assembly');
+  lines.push('; Generated by WHILE Compiler — Phase 6');
+  lines.push('; =========================================');
+  lines.push('');
+
+  for (const ins of ir) {
+    if (ins.op === 'label') {
+      lines.push(`\n${ins.arg1}:`);
+      continue;
+    }
+    if (ins.op === 'assign') {
+      const src = isImm(ins.arg1) ? `#${ins.arg1}` : reg(ins.arg1);
+      lines.push(`  MOV ${reg(ins.result)}, ${src}`);
+      continue;
+    }
+    if (ins.op === 'binop') {
+      const opMap = {
+        '+':'ADD', '-':'SUB', '*':'MUL', '/':'DIV',
+        '>=':'CMP_GE', '<=':'CMP_LE', '==':'CMP_EQ',
+        '!=':'CMP_NE', '>':'CMP_GT', '<':'CMP_LT',
+        '&&':'AND', '||':'OR'
+      };
+      const l = isImm(ins.arg1) ? `#${ins.arg1}` : reg(ins.arg1);
+      const r = isImm(ins.arg2) ? `#${ins.arg2}` : reg(ins.arg2);
+      lines.push(`  ${opMap[ins.op2]||'OP'} ${reg(ins.result)}, ${l}, ${r}`);
+      continue;
+    }
+    if (ins.op === 'ifFalse') {
+      const c = isImm(ins.arg1) ? `#${ins.arg1}` : reg(ins.arg1);
+      lines.push(`  CMP  ${c}, #0`);
+      lines.push(`  JEQ  ${ins.goto}`);
+      continue;
+    }
+    if (ins.op === 'goto') {
+      lines.push(`  JMP  ${ins.goto}`);
+      continue;
+    }
+  }
+
+  lines.push('');
+  lines.push('; -----------------------------------------');
+  lines.push('; Register Allocation Map');
+  lines.push('; -----------------------------------------');
+  for (const [k, v] of Object.entries(regMap)) {
+    lines.push(`;   ${v}  →  ${k}`);
+  }
+  lines.push('');
+  lines.push('; END OF GENERATED CODE');
+  return lines.join('\n');
+}
+
+/* ============================================================
+   INNOVATION TWIST: INFINITE LOOP DETECTOR
+   ============================================================ */
+function detectInfiniteLoops(ast) {
+  const loops = [];
+
+  function check(node) {
+    if (!node) return;
+    if (node.type === 'Program' || node.type === 'Block') {
+      (node.body || []).forEach(check);
+      return;
+    }
+    if (node.type === 'While') {
+      const condVars      = getCondVars(node.cond);
+      const modifiedInBody = new Set();
+      collectModified(node.body, modifiedInBody);
+      const hasGoto       = hasGotoInside(node.body);
+      const noneModified  = condVars.every(v => !modifiedInBody.has(v));
+      const constTrue     = isConstantTrue(node.cond);
+      const xGrows        = checkGrows(node.cond, node.body);
+
+      let verdict = 'safe';
+      let reason  = 'Condition variable(s) are modified in the loop body — loop can terminate.';
+
+      if (constTrue) {
+        verdict = 'infinite';
+        reason  = 'Condition evaluates to a constant true value — loop never exits.';
+      } else if (xGrows) {
+        verdict = 'infinite';
+        reason  = 'Condition variable is only increased while condition is x > 0 — loop diverges.';
+      } else if (noneModified && !hasGoto) {
+        verdict = 'infinite';
+        reason  = `Condition variable(s) [${condVars.join(', ')}] are never modified in the loop body.`;
+      } else if (hasGoto) {
+        verdict = 'risk';
+        reason  = 'Loop contains a goto — termination depends on external control flow.';
+      }
+
+      loops.push({
+        cond: exprStr(node.cond),
+        condVars,
+        modifiedInBody: [...modifiedInBody],
+        verdict,
+        reason
+      });
+
+      check(node.body);
+    }
+  }
+
+  function getCondVars(e) {
+    if (!e) return [];
+    if (e.type === 'Var')   return [e.name];
+    if (e.type === 'BinOp') return [...getCondVars(e.left), ...getCondVars(e.right)];
+    return [];
+  }
+  function collectModified(node, set) {
+    if (!node) return;
+    if (node.type === 'Assign') set.add(node.name);
+    if (node.type === 'Block')  node.body.forEach(s => collectModified(s, set));
+    if (node.type === 'While')  collectModified(node.body, set);
+  }
+  function hasGotoInside(node) {
+    if (!node) return false;
+    if (node.type === 'Goto')  return true;
+    if (node.type === 'Block') return node.body.some(hasGotoInside);
+    if (node.type === 'While') return hasGotoInside(node.body);
+    return false;
+  }
+  function isConstantTrue(e) {
+    if (!e) return false;
+    if (e.type === 'Num') return e.val !== 0;
+    if (e.type === 'BinOp' && e.left.type === 'Num' && e.right.type === 'Num') {
+      const l = e.left.val, r = e.right.val;
+      if (e.op === '>') return l > r;
+      if (e.op === '>=') return l >= r;
+      if (e.op === '<')  return l < r;
+      if (e.op === '<=') return l <= r;
+      if (e.op === '==') return l === r;
+      if (e.op === '!=') return l !== r;
+    }
+    return false;
+  }
+  // Detect: while(x > 0) { x = x + N } where N > 0
+  function checkGrows(cond, body) {
+    if (!cond || cond.type !== 'BinOp') return false;
+    if (cond.op !== '>' && cond.op !== '>=') return false;
+    if (cond.left.type !== 'Var') return false;
+    const v = cond.left.name;
+    const assigns = [];
+    function findAssign(n) {
+      if (!n) return;
+      if (n.type === 'Assign' && n.name === v) assigns.push(n.expr);
+      if (n.type === 'Block') n.body.forEach(findAssign);
+    }
+    findAssign(body);
+    for (const expr of assigns) {
+      if (expr.type === 'BinOp' && expr.op === '+' && expr.left.type === 'Var' && expr.left.name === v) {
+        const rhs = expr.right;
+        if (rhs.type === 'Num' && rhs.val > 0) return true;
+      }
+    }
+    return false;
+  }
+
+  check(ast);
+  return loops;
+}
+
+/* ============================================================
+   MAIN COMPILE PIPELINE
+   ============================================================ */
+function compile() {
+  const src = document.getElementById('src').value.trim();
+  if (!src) { alert('Please enter source code.'); return; }
+
+  // Reset pipeline bar
+  [0,1,2,3,4,5].forEach(i => document.getElementById('ps'+i).className = 'pipe-step');
+
+  // Phase 1
+  const tokens = tokenize(src);
+  document.getElementById('ps0').className = 'pipe-step done';
+
+  // Phase 2
+  const parser = new Parser(tokens.slice());
+  const ast    = parser.parseProgram();
+  document.getElementById('ps1').className = parser.errors.length ? 'pipe-step error' : 'pipe-step done';
+
+  // Phase 3
+  const semInfo = semanticAnalysis(ast);
+  const loops   = detectInfiniteLoops(ast);
+  const hasInf  = loops.some(l => l.verdict === 'infinite');
+  const hasRisk = loops.some(l => l.verdict === 'risk');
+  document.getElementById('ps2').className =
+    semInfo.errors.length || hasInf ? 'pipe-step error' :
+    semInfo.warnings.length || hasRisk ? 'pipe-step warn' : 'pipe-step done';
+
+  // Phase 4
+  const ir = genIR(ast);
+  document.getElementById('ps3').className = 'pipe-step done';
+
+  // Phase 5
+  const { ir: optIR, notes: optNotes } = optimizeIR(ir);
+  document.getElementById('ps4').className = 'pipe-step done';
+
+  // Phase 6
+  const asmCode = generateCode(optIR);
+  document.getElementById('ps5').className = 'pipe-step done';
+
+  phaseResults = [
+    { tokens },
+    { ast, errors: parser.errors },
+    { semInfo, loops },
+    { ir },
+    { optIR, optNotes },
+    { asmCode }
+  ];
+
+  // Update tab styles
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach((t, i) => {
+    t.className = 'tab';
+    if (i === 2 && hasInf) t.className = 'tab danger';
+  });
+
+  showPhase(0);
+}
+
+/* ============================================================
+   RENDER FUNCTIONS
+   ============================================================ */
+function showPhase(idx) {
+  activePhase = idx;
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach((t, i) => t.classList.toggle('active', i === idx));
+  const box = document.getElementById('output-box');
+  if (!phaseResults.length) { box.innerHTML = '<pre style="color:#374151">Run the compiler first.</pre>'; return; }
+  const r = phaseResults[idx];
+  if      (idx === 0) renderLexer(box, r.tokens);
+  else if (idx === 1) renderParser(box, r.ast, r.errors);
+  else if (idx === 2) renderSemantic(box, r.semInfo, r.loops);
+  else if (idx === 3) renderIR(box, r.ir, false);
+  else if (idx === 4) renderIR(box, r.optIR, true, r.optNotes);
+  else if (idx === 5) renderCodeGen(box, r.asmCode);
+}
+
+function renderLexer(box, tokens) {
+  let html = '<h3>Phase 1 — Lexical Analysis</h3>';
+  html += '<div style="line-height:2.2;margin-bottom:14px">';
+  for (const t of tokens) {
+    if (t.type === 'EOF') continue;
+    const cls = t.type==='KW'?'tok-kw': t.type==='ID'?'tok-id': t.type==='NUM'?'tok-num': t.type==='OP'?'tok-op': t.type==='ERR'?'tok-err':'tok-punct';
+    html += `<span class="token ${cls}" title="${t.type}">${t.val}</span>`;
+  }
+  html += '</div>';
+  html += '<h3>Token Stream Table</h3>';
+  html += '<table class="ir-table"><thead><tr><th>#</th><th>Type</th><th>Lexeme</th></tr></thead><tbody>';
+  tokens.filter(t => t.type !== 'EOF').forEach((t, i) => {
+    html += `<tr><td>${i}</td><td>${t.type}</td><td>${t.val}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  box.innerHTML = html;
+}
+
+function renderParser(box, ast, errors) {
+  let html = '<h3>Phase 2 — Parsing (Recursive Descent AST)</h3>';
+  if (errors.length) errors.forEach(e => html += `<div class="alert alert-danger">${e}</div>`);
+  else html += `<div class="alert alert-success">Parse successful — no syntax errors detected</div>`;
+  html += `<pre>${astToString(ast) || '(empty program)'}</pre>`;
+  box.innerHTML = html;
+}
+
+function renderSemantic(box, semInfo, loops) {
+  const hasInf  = loops.some(l => l.verdict === 'infinite');
+  const hasRisk = loops.some(l => l.verdict === 'risk');
+  let html = '<h3>Phase 3 — Semantic Analysis + Infinite Loop Detection</h3>';
+  if (hasInf)       html += `<div class="alert alert-danger">⚠ Infinite loop(s) detected — program may never terminate!</div>`;
+  else if (hasRisk) html += `<div class="alert alert-warn">Possible infinite loop detected (goto-based control flow)</div>`;
+  else if (!loops.length) html += `<div class="alert alert-info">No loops found in this program</div>`;
+  else              html += `<div class="alert alert-success">All loops appear to terminate safely</div>`;
+
+  if (semInfo.warnings.length) {
+    html += '<h3>Warnings</h3>';
+    semInfo.warnings.forEach(w => html += `<div class="alert alert-warn">${w}</div>`);
+  }
+  if (semInfo.errors.length) {
+    html += '<h3>Errors</h3>';
+    semInfo.errors.forEach(e => html += `<div class="alert alert-danger">${e}</div>`);
+  }
+
+  html += '<h3>Symbol Table</h3>';
+  html += '<table class="sym-table"><thead><tr><th>Variable</th><th>Inferred Type</th><th>Initialized</th><th>Modified</th></tr></thead><tbody>';
+  for (const [k, v] of Object.entries(semInfo.symbols)) {
+    html += `<tr><td>${k}</td><td>${v.type}</td><td>${v.initialized?'✓':'✗'}</td><td>${v.modified?'✓':'—'}</td></tr>`;
+  }
+  if (!Object.keys(semInfo.symbols).length) html += '<tr><td colspan="4" style="color:#374151">No variables found</td></tr>';
+  html += '</tbody></table>';
+
+  if (loops.length) {
+    html += '<h3>Loop Analysis Report</h3>';
+    loops.forEach((l, i) => {
+      const badge = l.verdict==='infinite'?'loop-badge loop-inf': l.verdict==='risk'?'loop-badge loop-risk':'loop-badge loop-safe';
+      const label = l.verdict==='infinite'?'INFINITE': l.verdict==='risk'?'POSSIBLE INFINITE':'SAFE';
+      html += `<div class="loop-card">`;
+      html += `<div style="font-size:13px;font-weight:600;margin-bottom:6px">Loop ${i+1}: <code>while (${l.cond})</code><span class="${badge}">${label}</span></div>`;
+      html += `<div style="font-size:11.5px;color:#64748b;margin-bottom:2px">Condition variables: <code>${l.condVars.join(', ')||'none'}</code></div>`;
+      html += `<div style="font-size:11.5px;color:#64748b;margin-bottom:4px">Variables modified in body: <code>${l.modifiedInBody.join(', ')||'none'}</code></div>`;
+      const col = l.verdict==='infinite'?'#f87171': l.verdict==='risk'?'#fb923c':'#4ade80';
+      html += `<div style="font-size:12px;color:${col}">${l.reason}</div>`;
+      html += '</div>';
+    });
+  }
+  box.innerHTML = html;
+}
+
+function renderIR(box, ir, isOpt, notes) {
+  let html = isOpt ? '<h3>Phase 5 — IR Optimization (Constant Folding & Propagation)</h3>'
+                   : '<h3>Phase 4 — Intermediate Representation (3-Address Code)</h3>';
+  if (isOpt && notes) {
+    html += '<h3>Optimizations Applied</h3>';
+    notes.forEach(n => html += `<div class="alert alert-info">${n}</div>`);
+    html += '<h3>Optimized IR Listing</h3>';
+  }
+  html += `<table class="ir-table"><thead><tr><th>#</th><th>Op</th><th>Result</th><th>Arg1</th><th>Arg2 / Goto</th>${isOpt?'<th>Note</th>':''}</tr></thead><tbody>`;
+  ir.forEach((ins, i) => {
+    if (ins.op === 'label') {
+      html += `<tr style="background:#0a1628"><td>${i}</td><td colspan="${isOpt?4:3}" style="color:#60a5fa;font-weight:600">${ins.arg1}:</td>${isOpt?'<td></td>':''}</tr>`;
+    } else {
+      const cls = ins.folded ? 'highlight' : '';
+      const note = ins.folded ? `fold → ${ins.foldedVal}` : ins.propagated ? 'propagated' : '';
+      html += `<tr class="${cls}"><td>${i}</td><td>${ins.op}${ins.op2?' '+ins.op2:''}</td><td>${ins.result||''}</td><td>${ins.arg1||''}</td><td>${ins.arg2||ins.goto||''}</td>${isOpt?`<td style="color:#fb923c;font-size:10.5px">${note}</td>`:''}</tr>`;
+    }
+  });
+  html += '</tbody></table>';
+  box.innerHTML = html;
+}
+
+function renderCodeGen(box, asm) {
+  const lines = asm.split('\n');
+  let html = '<h3>Phase 6 — Code Generation (WHILE-ISA Assembly)</h3><div class="asm-line">';
+  for (const line of lines) {
+    if (line.trimStart().startsWith(';')) {
+      html += `<span class="asm-comment">${line}</span><br>`;
+    } else if (line.match(/^[A-Za-z_][A-Za-z0-9_]*:/)) {
+      html += `<span class="asm-label">${line}</span><br>`;
+    } else if (line.match(/^\s+(MOV|ADD|SUB|MUL|DIV|CMP|JMP|JEQ|CMP_GE|CMP_LE|CMP_EQ|CMP_NE|CMP_GT|CMP_LT|AND|OR|OP)/)) {
+      const parts = line.trimStart().split(/\s+/);
+      html += `&nbsp;&nbsp;<span class="asm-op">${parts[0]}</span> <span class="asm-reg">${parts.slice(1).join(' ')}</span><br>`;
+    } else {
+      html += `${line}<br>`;
+    }
+  }
+  html += '</div>';
+  box.innerHTML = html;
+}
+
+// Auto-compile on load
+compile();
+</script>
+</body>
+</html>
